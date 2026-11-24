@@ -1,0 +1,989 @@
+<title>Klangmotor</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: Cockpit – links Drehzahlmesser + Gaspedal, rechts Einstellungen; auf dem Handy untereinander.
+   Bewusst nur dunkel (Armaturenbrett bei Nacht, blendet im Auto nicht). */
+:root {
+  color-scheme: dark;
+  --bg: #121315;
+  --panel: #1b1d21;
+  --panel-2: #24272c;
+  --line: #33363d;
+  --fg: #ece9e4;
+  --muted: #9a978f;
+  --rosso: #d8312b;
+  --rosso-dim: #7d2320;
+  --amber: #f0b43a;
+  --ok: #4cc38a;
+  --warn: #f0b43a;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --r: 10px;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--fg); }
+body {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 32px;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.app { max-width: 1040px; margin: 0 auto; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 860px) { .app { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; } }
+
+header.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+header.top h1 { font-family: var(--font-display); font-weight: 700; font-size: 26px; letter-spacing: 0.02em; margin: 0; text-transform: uppercase; }
+header.top h1 span { color: var(--rosso); }
+.pill { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.err { color: var(--rosso); border-color: var(--rosso-dim); }
+.spacer { flex: 1; }
+
+.cockpit { display: grid; gap: 12px; min-width: 0; }
+.dial-wrap { position: relative; background: radial-gradient(ellipse at 50% 60%, #1f2126 0%, var(--bg) 72%); border-radius: 16px; }
+#tach { display: block; width: 100%; max-width: 100%; aspect-ratio: 1.35; }
+.start-overlay { position: absolute; inset: 0; display: grid; place-items: center; }
+.start-overlay[hidden] { display: none !important; }
+.btn-start {
+  font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: 0.12em; text-transform: uppercase;
+  width: 150px; height: 150px; border-radius: 50%; border: 3px solid var(--rosso); color: var(--fg);
+  background: radial-gradient(circle at 50% 40%, #3a1715, #1a0c0b); cursor: pointer;
+  box-shadow: 0 0 0 6px #0008, 0 0 40px #d8312b33;
+}
+.btn-start:active { transform: scale(0.97); }
+
+.readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ro { background: var(--panel); border-radius: var(--r); padding: 8px 12px; }
+.ro .k { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.ro .v { font-family: var(--font-display); font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.loadbar { height: 8px; border-radius: 4px; background: var(--panel-2); margin-top: 10px; overflow: hidden; }
+.loadbar i { display: block; height: 100%; width: 0%; background: var(--amber); }
+
+.pedal-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; }
+#pedal {
+  height: 150px; border-radius: 14px; border: 1px solid var(--line); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  background: repeating-linear-gradient(0deg, #2a2d33 0 6px, #202227 6px 14px);
+  font-family: var(--font-display); font-size: 30px; font-weight: 700; letter-spacing: 0.2em; color: var(--muted);
+  display: grid; place-items: center; transition: background-color .1s;
+}
+#pedal.down { color: var(--fg); background: repeating-linear-gradient(0deg, #5a1c19 0 6px, #3d1412 6px 14px); border-color: var(--rosso); }
+.side-ctl { display: grid; gap: 8px; align-content: start; }
+.small { font-size: 12px; color: var(--muted); }
+
+.toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; accent-color: var(--rosso); }
+
+.panels { display: grid; gap: 12px; min-width: 0; }
+.card { background: var(--panel); border-radius: var(--r); padding: 14px; min-width: 0; }
+.card h2, details > summary { font-family: var(--font-display); font-weight: 600; font-size: 17px; letter-spacing: 0.06em; text-transform: uppercase; margin: 0; }
+details.card > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸"; color: var(--rosso); transition: transform .15s; }
+details.card[open] > summary::before { transform: rotate(90deg); }
+details.card > summary .sum-note { font-family: var(--font-body); font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--muted); margin-left: auto; }
+.card-body { display: grid; gap: 12px; margin-top: 12px; }
+
+.field { display: grid; gap: 4px; }
+.field label, .lbl { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+select, input[type="number"], textarea {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+input[type="range"] { width: 100%; accent-color: var(--rosso); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.btn:hover { border-color: #4a4e57; }
+.btn.primary { background: var(--rosso); border-color: var(--rosso); color: #fff; font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.pgroup { font-family: var(--font-display); font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); margin-top: 6px; }
+.prow { display: grid; grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr) 4.6rem; gap: 10px; align-items: center; }
+.prow label { font-size: 13px; }
+.prow output { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); text-align: right; }
+@media (max-width: 420px) { .prow { grid-template-columns: minmax(0, 1fr) 4.2rem; } .prow input { grid-column: 1 / -1; order: 3; } }
+
+.log { background: #0c0d0f; border-radius: 8px; padding: 8px 10px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--muted); max-height: 160px; overflow: auto; white-space: pre-wrap; margin: 0; }
+.note { font-size: 13px; color: var(--muted); }
+.note strong { color: var(--fg); font-weight: 600; }
+.warnbox { border-left: 3px solid var(--warn); padding: 6px 10px; background: #2a2316; border-radius: 0 8px 8px 0; font-size: 13px; }
+footer { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1>Klang<span>motor</span></h1>
+    <span class="pill" id="srcPill">Aus</span>
+    <span class="spacer"></span>
+    <span class="small" id="presetLabel"></span>
+  </header>
+
+  <section class="cockpit">
+    <div class="dial-wrap">
+      <canvas id="tach" aria-label="Drehzahlmesser"></canvas>
+      <div class="start-overlay" id="startOverlay">
+        <button class="btn-start" id="btnStart" type="button">Start</button>
+      </div>
+    </div>
+
+    <div class="readouts">
+      <div class="ro"><div class="k">Gang</div><div class="v" id="roGear">–</div></div>
+      <div class="ro"><div class="k">Echt U/min</div><div class="v" id="roReal">0</div></div>
+      <div class="ro"><div class="k">Last</div><div class="loadbar"><i id="roLoad"></i></div></div>
+    </div>
+
+    <div class="pedal-row">
+      <div id="pedal" role="button" aria-label="Gaspedal gedrückt halten">GAS</div>
+      <div class="side-ctl">
+        <span class="lbl">Teilgas</span>
+        <input type="range" id="partThrottle" min="0" max="100" value="0" aria-label="Teilgas">
+        <label class="toggle"><input type="checkbox" id="chkGears" checked> Gänge</label>
+        <label class="toggle"><input type="checkbox" id="chkPops" checked> Knallen</label>
+      </div>
+    </div>
+    <p class="small" id="hintLine">Gaspedal gedrückt halten = Vollgas, loslassen = Schub. Am PC geht auch die Leertaste.</p>
+  </section>
+
+  <section class="panels">
+    <div class="card">
+      <h2>Motor</h2>
+      <div class="card-body">
+        <div class="field">
+          <label for="presetSel">Klang</label>
+          <select id="presetSel"></select>
+        </div>
+        <div class="field">
+          <label for="volume">Lautstärke</label>
+          <input type="range" id="volume" min="0" max="100" value="70">
+        </div>
+        <div class="grid2">
+          <div class="field"><label for="mRealIdle">Echt Leerlauf</label><input type="number" id="mRealIdle" min="300" max="2000" step="50" value="800"></div>
+          <div class="field"><label for="mRealMax">Echt Max</label><input type="number" id="mRealMax" min="2000" max="10000" step="100" value="6000"></div>
+          <div class="field"><label for="mVirtIdle">Sound Leerlauf</label><input type="number" id="mVirtIdle" min="500" max="2000" step="50" value="1000"></div>
+          <div class="field"><label for="mVirtMax">Sound Max</label><input type="number" id="mVirtMax" min="4000" max="10000" step="100" value="8700"></div>
+        </div>
+        <p class="note">Die echte Drehzahl deines Autos wird auf den Sound-Bereich umgerechnet. Ein Motor, der bei 6000 abregelt, klingt so trotzdem bis 8700.</p>
+      </div>
+    </div>
+
+    <details class="card" id="obdCard">
+      <summary>OBD über Bluetooth <span class="sum-note" id="obdSum">ELM327 BLE</span></summary>
+      <div class="card-body">
+        <div class="warnbox" id="bleWarn" hidden></div>
+        <div class="btns">
+          <button class="btn primary" id="btnObd" type="button">Adapter verbinden</button>
+          <button class="btn" id="btnSim" type="button">Zur Simulation</button>
+        </div>
+        <label class="toggle"><input type="checkbox" id="chkThrottle"> Gaspedal mit abfragen <span class="small">(genauer, weniger Drehzahlwerte/s)</span></label>
+        <div class="grid2">
+          <div class="ro"><div class="k">Abfragen/s</div><div class="v" id="roRate">–</div></div>
+          <div class="ro"><div class="k">Adapter</div><div class="v" id="roDev" style="font-size:16px">–</div></div>
+        </div>
+        <pre class="log" id="log"></pre>
+        <p class="note">Auf dem iPhone in der App <strong>Bluefy</strong> öffnen, Zündung an, dann „Adapter verbinden“ und den ELM327 auswählen (oft „OBDII“, „OBDBLE“, „IOS-Vlink“ oder „V-LINK“).</p>
+      </div>
+    </details>
+
+    <details class="card" id="tuneCard">
+      <summary>Klang-Regler <span class="sum-note">wie im PC-Editor</span></summary>
+      <div class="card-body">
+        <div class="btns">
+          <button class="btn" id="btnReset" type="button">Zurücksetzen</button>
+          <button class="btn" id="btnRandom" type="button">Zufall ±</button>
+          <button class="btn" id="btnCopy" type="button">JSON kopieren</button>
+          <label class="btn" for="fileIn">Datei laden</label>
+          <input type="file" id="fileIn" accept=".json,application/json" hidden>
+        </div>
+        <div class="field">
+          <label for="jsonBox">Preset-JSON (zum Einfügen oder Kopieren)</label>
+          <textarea id="jsonBox" rows="3" placeholder="JSON aus dem PC-Editor hier einfügen …"></textarea>
+          <div class="btns"><button class="btn" id="btnApplyJson" type="button">Eingefügtes JSON übernehmen</button></div>
+        </div>
+        <div id="params"></div>
+      </div>
+    </details>
+  </section>
+
+  <footer>Nur im Innenraum verwenden und nicht vom Verkehr ablenken lassen. Der Klang ist komplett synthetisch erzeugt.</footer>
+</div>
+
+<audio id="silent" loop playsinline></audio>
+
+<script>
+"use strict";
+
+/* ===================================================================== Synthese
+   1:1 aus EngineSynth.cs portiert. Läuft im AudioWorklet (oder als Fallback im Haupt-Thread). */
+function synthFactory() {
+  class Biquad {
+    constructor() { this.b0 = 0; this.b1 = 0; this.b2 = 0; this.a1 = 0; this.a2 = 0; this.z1 = 0; this.z2 = 0; }
+    bp(sr, f, q) {
+      const w = 2 * Math.PI * Math.min(f, sr * 0.45) / sr, al = Math.sin(w) / (2 * q), a0 = 1 + al;
+      this.b0 = al / a0; this.b1 = 0; this.b2 = -al / a0; this.a1 = -2 * Math.cos(w) / a0; this.a2 = (1 - al) / a0;
+    }
+    lp(sr, f, q) {
+      const w = 2 * Math.PI * Math.min(Math.max(f, 20), sr * 0.45) / sr, al = Math.sin(w) / (2 * q), cw = Math.cos(w), a0 = 1 + al;
+      this.b0 = (1 - cw) / 2 / a0; this.b1 = (1 - cw) / a0; this.b2 = this.b0; this.a1 = -2 * cw / a0; this.a2 = (1 - al) / a0;
+    }
+    p(x) { const y = this.b0 * x + this.z1; this.z1 = this.b1 * x - this.a1 * y + this.z2; this.z2 = this.b2 * x - this.a2 * y; return y; }
+    reset() { this.z1 = this.z2 = 0; }
+  }
+  const tc = (sr, s) => 1 - Math.exp(-1 / (sr * s));
+  const cc = (sr, f) => 1 - Math.exp(-2 * Math.PI * f / sr);
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  const ROOM_G = [0.42, 0.33, 0.26, 0.2, 0.15, 0.11];
+
+  class EngineSynthCore {
+    constructor(sr) {
+      this.sr = sr; this.volume = 0.7; this.backfire = true;
+      this.rpmA = tc(sr, 0.035); this.loadA = tc(sr, 0.08); this.wobA = tc(sr, 0.12);
+      this.rpm = 0; this.load = 0; this.wob = 0; this.wobT = 0; this.wobC = 0;
+      this.popDecay = Math.exp(-1 / (0.014 * sr)); this.popA = cc(sr, 2200); this.popLp = 0; this.popEnv = 0; this.popPh = 0;
+      this.rmsA = tc(sr, 0.12); this.rms = 0.01; this.agcA = tc(sr, 0.04); this.agc = 1; this.agcT = 0.05;
+      this.room = new Float32Array(4096); this.roomW = 0;
+      this.taps = [6.1, 9.7, 13.3, 17.9, 23.5, 31.0].map(ms => Math.round(ms * sr / 1000));
+      this.rlA = cc(sr, 3000); this.rrA = cc(sr, 2600); this.rl = 0; this.rr = 0;
+      this.banks = [this.mkBank(), this.mkBank()];
+      this.intake = new Biquad();
+      this.firePh = 0; this.nextFire = 1; this.cyl = 0;
+      this.cylGain = []; this.cylTiming = []; this.cylWidth = [];
+      this.rnd = rng(42); this.ns = 0x9E3779B9 >>> 0;
+      this.ctrl = 0; this.tRpm = 0; this.tLoad = 0; this.prevT = 0; this.falling = false;
+      this.p = null;
+    }
+    mkBank() {
+      return { res: [], resG: [], pipe: new Float32Array(8192), w: 0, delay: 100, damp: 0, dampA: 0, env: 0, envA: 0,
+               lp: new Biquad(), dcX: 0, dcY: 0, pos: 0, len: 0, att: 1, amp: 0, noise: 0, decay: 0, last: 0 };
+    }
+    noise() { let s = this.ns; s ^= s << 13; s ^= s >>> 17; s ^= s << 5; this.ns = s >>> 0; return this.ns / 2147483648 - 1; }
+    gauss() { return (this.rnd() + this.rnd() + this.rnd() - 1.5) / 1.5; }
+
+    setPreset(p) { this.configure(p, !this.p || p.Cylinders !== this.p.Cylinders); }
+
+    configure(p, reset) {
+      this.p = p;
+      const n = Math.max(2, p.Cylinders | 0), r = rng(n * 7919);
+      this.cylGain = []; this.cylTiming = []; this.cylWidth = [];
+      for (let i = 0; i < n; i++) {
+        this.cylGain.push(1 + p.CylinderVariation * (r() * 2 - 1));
+        this.cylTiming.push(0.5 * p.TimingJitter * (r() * 2 - 1));
+        this.cylWidth.push(1 + 0.15 * (r() * 2 - 1));
+      }
+      if (this.cyl >= n) this.cyl = 0;
+      for (let k = 0; k < 2; k++) {
+        const b = this.banks[k], det = k === 0 ? 1 - p.BankDetune / 2 : 1 + p.BankDetune / 2;
+        if (b.res.length !== p.Resonances.length) { b.res = p.Resonances.map(() => new Biquad()); b.resG = new Float64Array(p.Resonances.length); }
+        p.Resonances.forEach((rs, i) => { b.res[i].bp(this.sr, rs.Freq * det, Math.max(0.3, rs.Q)); b.resG[i] = rs.Gain; });
+        b.dampA = cc(this.sr, 2200); b.envA = cc(this.sr, 250);
+        b.delay = clamp(Math.floor(p.PipeMs * det * this.sr / 1000), 8, b.pipe.length - 1);
+        if (reset) { b.pipe.fill(0); b.res.forEach(f => f.reset()); b.lp.reset(); b.len = 0; }
+      }
+      this.intake.bp(this.sr, p.IntakeFreq, 1.4);
+    }
+
+    setInput(rpm, load) {
+      this.falling = rpm < this.prevT - 1; this.prevT = rpm;
+      this.tRpm = rpm; this.tLoad = clamp(load, 0, 1);
+    }
+
+    bank(b, p, flowAmt, wob) {
+      let env = 0, exc = 0;
+      if (b.pos < b.len) {
+        if (b.pos < b.att) { const s = Math.sin(Math.PI * 0.5 * b.pos / b.att); env = s * s; }
+        else env = Math.exp(-b.decay * (b.pos - b.att));
+        exc = env * b.amp * (1 + b.noise * this.noise());
+        b.pos++;
+      }
+      b.last = env;
+      b.env += b.envA * (env * b.amp - b.env);
+      exc += this.noise() * flowAmt * (0.15 + 2.0 * b.env);
+      const mask = b.pipe.length - 1;
+      b.damp += b.dampA * (b.pipe[(b.w - b.delay) & mask] - b.damp);
+      const out = exc + p.PipeFeedback * b.damp;
+      b.pipe[b.w] = out; b.w = (b.w + 1) & mask;
+      let body = p.DirectGain * out;
+      for (let i = 0; i < b.res.length; i++) body += b.res[i].p(out) * b.resG[i];
+      return body * (1 + 0.08 * wob);
+    }
+
+    fire(rpmNorm, load, fireFreq) {
+      const p = this.p, n = this.cylGain.length;
+      this.cyl = (this.cyl + 1) % n;
+      const b = this.banks[this.cyl & 1];
+      const interval = this.sr / Math.max(fireFreq, 1);
+      const width = p.PulseMs * this.sr / 1000 * this.cylWidth[this.cyl];
+      b.len = Math.floor(Math.max(6, Math.min(width, 1.6 * interval)));
+      b.att = Math.max(1, Math.floor(b.len * clamp(p.PulseAttack, 0.02, 0.9)));
+      b.decay = 5 / Math.max(1, b.len - b.att);
+      b.pos = 0;
+      const low = 1 - Math.min(rpmNorm, 1), rough = p.IdleRoughness * low * low;
+      const amp = this.cylGain[this.cyl] * (1 + p.AmpJitter * this.gauss()) * (1 + rough * (this.rnd() * 2 - 1));
+      b.amp = Math.max(0.05, amp) * (0.3 + 0.7 * load);
+      b.noise = p.CombustionNoise * (0.4 + 0.6 * load);
+      const jit = p.TimingJitter * (0.5 + low) * this.gauss();
+      this.nextFire = clamp(1 + this.cylTiming[this.cyl] + jit, 0.7, 1.3);
+      if (this.backfire && load < 0.07 && this.falling && rpmNorm > 0.3 && this.popEnv < 0.05 && this.rnd() < 0.035)
+        this.popEnv = 0.6 + 0.5 * this.rnd();
+    }
+
+    render(L, R, frames) {
+      const p = this.p, sr = this.sr;
+      if (!p) { L.fill(0); R.fill(0); return; }
+      const redline = p.DefaultRedline, vol = this.volume, n = Math.max(2, p.Cylinders | 0);
+      const pan = 0.5 + 0.4 * clamp(p.Stereo, 0, 1), room = clamp(p.Room, 0, 1), rmask = this.room.length - 1;
+      const bA = this.banks[0], bB = this.banks[1];
+      for (let f = 0; f < frames; f++) {
+        this.rpm += this.rpmA * (this.tRpm - this.rpm);
+        this.load += this.loadA * (this.tLoad - this.load);
+        const rpm = this.rpm, load = this.load, rpmNorm = clamp(rpm / redline, 0, 1.05);
+
+        if ((this.ctrl++ & 63) === 0) {
+          const bright = clamp(0.55 * load + 0.45 * rpmNorm, 0, 1);
+          const cut = p.CutoffLow + (p.CutoffHigh - p.CutoffLow) * bright;
+          bA.lp.lp(sr, cut * (1 + 0.04 * this.wob), 0.75);
+          bB.lp.lp(sr, cut * (1 - 0.04 * this.wob), 0.75);
+          this.agcT = Math.pow(10, (-24 + 11 * load + 6 * rpmNorm) / 20);
+        }
+        if (++this.wobC >= 3000) { this.wobC = 0; this.wobT = this.rnd() * 2 - 1; }
+        this.wob += this.wobA * (this.wobT - this.wob);
+        const wob = this.wob;
+
+        const fireFreq = rpm / 60 * n / 2;
+        if (rpm > 120) {
+          this.firePh += fireFreq / sr;
+          if (this.firePh >= this.nextFire) { this.firePh -= this.nextFire; this.fire(rpmNorm, load, fireFreq); }
+        }
+
+        const flowAmt = p.FlowNoise * (0.25 + 0.75 * load) * 0.35;
+        const oA = this.bank(bA, p, flowAmt, wob), oB = this.bank(bB, p, flowAmt, -wob);
+        const env = Math.max(bA.last, bB.last);
+        const intake = this.intake.p(this.noise()) * p.IntakeNoise * rpmNorm * (0.3 + 0.7 * load) * (0.6 + 0.8 * env);
+
+        const drive = p.DriveLow + (p.DriveHigh - p.DriveLow) * load;
+        const xA = bA.lp.p(Math.tanh((oA + intake) * drive));
+        const xB = bB.lp.p(Math.tanh((oB + intake) * drive));
+        const dA = xA - bA.dcX + 0.995 * bA.dcY; bA.dcX = xA; bA.dcY = dA;
+        const dB = xB - bB.dcX + 0.995 * bB.dcY; bB.dcX = xB; bB.dcY = dB;
+
+        let l = pan * dA + (1 - pan) * dB, r = (1 - pan) * dA + pan * dB;
+        const mono = 0.5 * (l + r);
+        this.rms += this.rmsA * (mono * mono - this.rms);
+        const tgt = Math.min(this.agcT / Math.sqrt(this.rms + 1e-12), 40);
+        this.agc += this.agcA * (tgt - this.agc);
+        const g = this.agc * clamp((rpm - 120) / 350, 0, 1);
+        l *= g; r *= g;
+
+        let pop = 0;
+        if (this.popEnv > 0.001) {
+          this.popPh += 2 * Math.PI * 80 / sr;
+          pop = (this.noise() * 0.8 + Math.sin(this.popPh) * 0.7) * this.popEnv * 1.6;
+          this.popEnv *= this.popDecay;
+        }
+        this.popLp += this.popA * (pop - this.popLp);
+        l += this.popLp * 0.45; r += this.popLp * 0.45 * 0.85;
+
+        this.room[this.roomW] = 0.5 * (l + r);
+        let rl = 0, rr = 0;
+        for (let t = 0; t < 6; t++) {
+          const v = this.room[(this.roomW - this.taps[t]) & rmask] * ROOM_G[t];
+          if ((t & 1) === 0) rl += v; else rr += v;
+        }
+        this.roomW = (this.roomW + 1) & rmask;
+        this.rl += this.rlA * (rl - this.rl); this.rr += this.rrA * (rr - this.rr);
+        l += room * this.rl; r += room * this.rr;
+
+        L[f] = Math.tanh(l * vol * 1.2) / 1.2;
+        R[f] = Math.tanh(r * vol * 1.2) / 1.2;
+      }
+    }
+  }
+  return EngineSynthCore;
+}
+
+/* ===================================================================== Presets */
+const BUILTIN = [
+  { Name: "Mein V10 (vom PC)", Cylinders: 10, PulseMs: 2.5224, PulseAttack: 0.18, CombustionNoise: 0.4, CylinderVariation: 0.08,
+    IdleRoughness: 0.15, TimingJitter: 0.03, AmpJitter: 0.08, FlowNoise: 0.3,
+    Resonances: [{ Freq: 194.84, Q: 1.0206, Gain: 1 }, { Freq: 485.75, Q: 1.8, Gain: 0.7 }, { Freq: 1350, Q: 2.5, Gain: 0.5 }, { Freq: 3100, Q: 3, Gain: 0.3 }],
+    DirectGain: 1.5, PipeMs: 4.359, PipeFeedback: -0.7902, BankDetune: 0.25, DriveLow: 1.3, DriveHigh: 3, CutoffLow: 2400, CutoffHigh: 10500,
+    IntakeNoise: 0.1, IntakeFreq: 3800, Room: 1, Stereo: 0.45, DefaultIdle: 1000, DefaultRedline: 8700 },
+  { Name: "V8 Flat-Plane (Mittelmotor)", Cylinders: 8, PulseMs: 1.6, PulseAttack: 0.2, CombustionNoise: 0.45, CylinderVariation: 0.12,
+    IdleRoughness: 0.2, TimingJitter: 0.035, AmpJitter: 0.1, FlowNoise: 0.32,
+    Resonances: [{ Freq: 130, Q: 1.0, Gain: 1.0 }, { Freq: 390, Q: 1.6, Gain: 0.7 }, { Freq: 1050, Q: 2.2, Gain: 0.45 }, { Freq: 2500, Q: 3.0, Gain: 0.25 }],
+    DirectGain: 0.3, PipeMs: 2.9, PipeFeedback: -0.35, BankDetune: 0.07, DriveLow: 1.3, DriveHigh: 3.2, CutoffLow: 2000, CutoffHigh: 9500,
+    IntakeNoise: 0.08, IntakeFreq: 3200, Room: 0.25, Stereo: 0.5, DefaultIdle: 1000, DefaultRedline: 8500 },
+  { Name: "V10 (Hochdrehzahl)", Cylinders: 10, PulseMs: 1.3, PulseAttack: 0.18, CombustionNoise: 0.4, CylinderVariation: 0.08,
+    IdleRoughness: 0.15, TimingJitter: 0.03, AmpJitter: 0.08, FlowNoise: 0.3,
+    Resonances: [{ Freq: 170, Q: 1.1, Gain: 1.0 }, { Freq: 500, Q: 1.8, Gain: 0.7 }, { Freq: 1350, Q: 2.5, Gain: 0.5 }, { Freq: 3100, Q: 3.0, Gain: 0.3 }],
+    DirectGain: 0.3, PipeMs: 2.3, PipeFeedback: -0.32, BankDetune: 0.06, DriveLow: 1.3, DriveHigh: 3.0, CutoffLow: 2400, CutoffHigh: 10500,
+    IntakeNoise: 0.1, IntakeFreq: 3800, Room: 0.25, Stereo: 0.45, DefaultIdle: 1000, DefaultRedline: 8700 },
+  { Name: "V12 (Frontmotor-GT)", Cylinders: 12, PulseMs: 1.1, PulseAttack: 0.16, CombustionNoise: 0.35, CylinderVariation: 0.05,
+    IdleRoughness: 0.1, TimingJitter: 0.025, AmpJitter: 0.06, FlowNoise: 0.28,
+    Resonances: [{ Freq: 200, Q: 1.2, Gain: 1.0 }, { Freq: 600, Q: 2.0, Gain: 0.65 }, { Freq: 1600, Q: 2.8, Gain: 0.5 }, { Freq: 3600, Q: 3.5, Gain: 0.32 }],
+    DirectGain: 0.35, PipeMs: 1.9, PipeFeedback: -0.3, BankDetune: 0.05, DriveLow: 1.2, DriveHigh: 2.7, CutoffLow: 2800, CutoffHigh: 11500,
+    IntakeNoise: 0.11, IntakeFreq: 4200, Room: 0.25, Stereo: 0.4, DefaultIdle: 1000, DefaultRedline: 8900 },
+];
+const clone = o => JSON.parse(JSON.stringify(o));
+
+/* Regler – gleiche Liste wie SoundEditorForm.cs */
+const PARAMS = (() => {
+  const L = [];
+  const add = (g, label, key, min, max, fmt = 2, log = false) => L.push({ g, label, key, min, max, fmt, log });
+  add("Grundlage", "Zylinder", "Cylinders", 4, 12, 0);
+  add("Verbrennungsimpuls", "Impulsbreite (ms)", "PulseMs", 0.3, 4, 2, true);
+  add("Verbrennungsimpuls", "Anstieg", "PulseAttack", 0.02, 0.7);
+  add("Verbrennungsimpuls", "Verbrennungsrauschen", "CombustionNoise", 0, 1.5);
+  const g3 = "Lebendigkeit";
+  add(g3, "Zylinder-Unterschiede", "CylinderVariation", 0, 0.5);
+  add(g3, "Leerlauf-Unruhe", "IdleRoughness", 0, 0.8);
+  add(g3, "Zeit-Jitter", "TimingJitter", 0, 0.12, 3);
+  add(g3, "Stärke-Jitter", "AmpJitter", 0, 0.4);
+  add(g3, "Strömungsrauschen", "FlowNoise", 0, 1.5);
+  add("Abgasanlage", "Direktanteil", "DirectGain", 0, 1.5);
+  add("Abgasanlage", "Rohrlänge (ms)", "PipeMs", 0.5, 8, 2, true);
+  add("Abgasanlage", "Rohr-Rückkopplung", "PipeFeedback", -0.9, 0.9);
+  add("Abgasanlage", "Unterschied der Stränge", "BankDetune", 0, 0.25, 3);
+  for (let i = 0; i < 4; i++) {
+    add("Resonanzen", `Resonanz ${i + 1} Frequenz`, `R${i}.Freq`, 50, 8000, 0, true);
+    add("Resonanzen", `Resonanz ${i + 1} Güte`, `R${i}.Q`, 0.4, 10, 2, true);
+    add("Resonanzen", `Resonanz ${i + 1} Pegel`, `R${i}.Gain`, 0, 2);
+  }
+  add("Charakter", "Sättigung Teillast", "DriveLow", 0.5, 6);
+  add("Charakter", "Sättigung Volllast", "DriveHigh", 0.5, 8);
+  add("Charakter", "Helligkeit niedrig (Hz)", "CutoffLow", 400, 8000, 0, true);
+  add("Charakter", "Helligkeit hoch (Hz)", "CutoffHigh", 1500, 18000, 0, true);
+  add("Charakter", "Ansaugfauchen", "IntakeNoise", 0, 0.5);
+  add("Charakter", "Ansaugfrequenz (Hz)", "IntakeFreq", 800, 9000, 0, true);
+  add("Raum", "Reflexionen", "Room", 0, 1);
+  add("Raum", "Stereobreite", "Stereo", 0, 1);
+  return L;
+})();
+function pget(p, key) {
+  if (key[0] === "R" && key[2] === ".") { const r = p.Resonances[+key[1]]; return r ? r[key.slice(3)] : 0; }
+  return p[key];
+}
+function pset(p, key, v) {
+  if (key === "Cylinders") v = Math.round(v / 2) * 2;
+  if (key[0] === "R" && key[2] === ".") { const r = p.Resonances[+key[1]]; if (r) r[key.slice(3)] = v; return; }
+  p[key] = v;
+}
+const toBar = (d, v) => { v = Math.min(d.max, Math.max(d.min, v)); return Math.round(1000 * (d.log ? Math.log(v / d.min) / Math.log(d.max / d.min) : (v - d.min) / (d.max - d.min))); };
+const fromBar = (d, b) => { const t = b / 1000; return d.log ? d.min * Math.pow(d.max / d.min, t) : d.min + t * (d.max - d.min); };
+
+/* ===================================================================== Drehzahl, Abbildung, Simulator */
+const now = () => performance.now() / 1000;
+class RpmTracker {
+  constructor() { this.reset(); this.maxAhead = 0.15; }
+  reset() { this.has = false; this.rpm = 0; this.t = 0; this.vel = 0; this.thr = NaN; this.thrT = 0; this.thrMin = Infinity; this.thrMax = -Infinity; }
+  pushRpm(rpm) {
+    const t = now();
+    if (this.has) { const dt = t - this.t; if (dt > 0.004) this.vel = this.vel * 0.4 + (rpm - this.rpm) / dt * 0.6; }
+    this.rpm = rpm; this.t = t; this.has = true;
+  }
+  pushThrottle(pct) { this.thr = pct; this.thrT = now(); this.thrMin = Math.min(this.thrMin, pct); this.thrMax = Math.max(this.thrMax, pct); }
+  pushLoad(x) { this.thrMin = 0; this.thrMax = 100; this.thr = Math.max(0, Math.min(1, x)) * 100; this.thrT = now(); }
+  snapshot() {
+    if (!this.has) return { rpm: 0, vel: 0, thr: null };
+    const t = now(), ahead = Math.max(0, Math.min(t - this.t, this.maxAhead));
+    let thr = null;
+    if (!isNaN(this.thr) && t - this.thrT < 1) { const span = Math.max(this.thrMax - this.thrMin, 15); thr = Math.max(0, Math.min(1, (this.thr - this.thrMin) / span)); }
+    return { rpm: Math.max(0, this.rpm + this.vel * ahead), vel: this.vel, thr };
+  }
+}
+const map = { realIdle: 800, realMax: 6000, virtIdle: 1000, virtMax: 8700 };
+function mapRpm(real) {
+  const ri = map.realIdle, rm = Math.max(map.realMax, ri + 100), vi = map.virtIdle, vm = Math.max(map.virtMax, vi + 100);
+  if (real < 1) return 0;
+  if (real < ri) return real * vi / ri;
+  return Math.min(vi + (real - ri) / (rm - ri) * (vm - vi), vm * 1.03);
+}
+function engineInput(tr) {
+  const s = tr.snapshot();
+  const load = s.thr != null ? s.thr : Math.max(0, Math.min(1, 0.25 + s.vel / 1500));
+  return { virt: mapRpm(s.rpm), load, real: s.rpm };
+}
+
+class Simulator {
+  constructor(tr) { this.tr = tr; this.throttle = 0; this.autoShift = true; this.gear = 1; this.rpm = map.realIdle; this.cut = 0; }
+  static R = [3.3, 2.2, 1.65, 1.3, 1.07, 0.9];
+  step(dt) {
+    const R = Simulator.R, idle = map.realIdle, max = Math.max(map.realMax, idle + 500), span = max - idle;
+    let rpm = this.rpm, thr = this.throttle;
+    if (this.cut > 0) { this.cut -= dt; thr = 0; }
+    const neutral = !this.autoShift;
+    const gf = neutral ? 1.8 : Math.pow(R[this.gear - 1] / R[0], 1.5);
+    const nrm = Math.max(0, Math.min(1, (rpm - idle) / span));
+    const torque = 0.75 + 0.6 * nrm - 0.45 * nrm * nrm;
+    const accel = thr * torque * (span / 1.4) * gf;
+    const above = Math.max(0, rpm - idle);
+    const drag = (400 * Math.min(1, above / 200) + 0.35 * above) * (1 - 0.85 * thr) * (neutral ? 2.2 : 1);
+    rpm += (accel - drag) * dt;
+    if (rpm < idle) rpm += (idle - rpm) * Math.min(1, 8 * dt);
+    if (rpm >= max) { rpm = max; this.cut = 0.06; }
+    if (!neutral) {
+      if (thr > 0.3 && rpm >= max - 100 && this.gear < R.length) { rpm *= R[this.gear] / R[this.gear - 1]; this.gear++; this.cut = 0.07; }
+      else if (thr < 0.05 && this.gear > 1 && rpm < idle + 0.3 * span) { this.gear--; rpm *= R[this.gear - 1] / R[this.gear]; }
+    } else this.gear = 1;
+    this.rpm = rpm;
+    this.tr.pushRpm(rpm); this.tr.pushLoad(thr);
+  }
+}
+
+/* ===================================================================== ELM327 über Bluetooth LE (Web Bluetooth, z. B. Bluefy) */
+const BLE_SERVICES = [0xfff0, 0xffe0, 0x18f0, 0xfee7, "e7810a71-73ae-499d-8c15-faa9aef0c3f2", "0000ffe0-0000-1000-8000-00805f9b34fb"];
+class BleElm {
+  constructor(log) { this.log = log; this.buf = ""; this.pending = null; this.single = true; this.dev = null; }
+  async connect() {
+    const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BLE_SERVICES });
+    this.dev = dev;
+    dev.addEventListener("gattserverdisconnected", () => this.onDisconnect && this.onDisconnect());
+    this.log(`Verbinde mit ${dev.name || "Gerät"} …`);
+    const gatt = await dev.gatt.connect();
+    let services = [];
+    try { services = await gatt.getPrimaryServices(); } catch (e) { /* manche Browser erlauben nur gezielte Abfrage */ }
+    if (!services.length) for (const s of BLE_SERVICES) { try { services.push(await gatt.getPrimaryService(s)); } catch (e) {} }
+    for (const s of services) {
+      let chars = [];
+      try { chars = await s.getCharacteristics(); } catch (e) { continue; }
+      let rx = null, tx = null;
+      for (const c of chars) {
+        if (!rx && (c.properties.notify || c.properties.indicate)) rx = c;
+        if (!tx && (c.properties.write || c.properties.writeWithoutResponse)) tx = c;
+      }
+      if (rx && tx) { this.rx = rx; this.tx = tx; this.log(`Dienst ${s.uuid.slice(4, 8).toUpperCase()} gefunden`); break; }
+    }
+    if (!this.rx) throw new Error("Keine serielle ELM327-Schnittstelle gefunden. Gefundene Dienste: " + (services.map(s => s.uuid.slice(4, 8)).join(", ") || "keine"));
+    await this.rx.startNotifications();
+    this.rx.addEventListener("characteristicvaluechanged", e => this.onData(e.target.value));
+    return dev.name || "ELM327";
+  }
+  onData(dv) {
+    for (let i = 0; i < dv.byteLength; i++) {
+      const c = String.fromCharCode(dv.getUint8(i));
+      if (c === ">") {
+        const r = this.buf; this.buf = "";
+        const p = this.pending; this.pending = null;
+        if (p) { clearTimeout(p.timer); p.res(BleElm.clean(r)); }
+      } else if (c !== "\0") this.buf += c;
+    }
+  }
+  static clean(s) { return s.replace(/SEARCHING\.\.\./g, " ").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim(); }
+  async send(cmd, timeout = 1500) {
+    this.buf = "";
+    const done = new Promise((res, rej) => {
+      const timer = setTimeout(() => { if (this.pending && this.pending.res === res) { this.pending = null; rej(new Error(`Keine Antwort auf ${cmd}`)); } }, timeout);
+      this.pending = { res, timer };
+    });
+    const data = new TextEncoder().encode(cmd + "\r");
+    if (this.tx.properties.writeWithoutResponse && this.tx.writeValueWithoutResponse) await this.tx.writeValueWithoutResponse(data);
+    else if (this.tx.writeValueWithResponse) await this.tx.writeValueWithResponse(data);
+    else await this.tx.writeValue(data);
+    return done;
+  }
+  async trySend(cmd) { try { const r = await this.send(cmd); return r.includes("?") ? null : r; } catch (e) { return null; } }
+  async init() {
+    const ver = await this.send("ATZ", 4000);
+    await this.send("ATE0"); await this.send("ATL0"); await this.send("ATS0"); await this.send("ATH0");
+    await this.trySend("ATAT2");
+    await this.send("ATSP0");
+    const r = await this.send("0100", 12000);
+    if (!r.replace(/ /g, "").toUpperCase().includes("4100")) throw new Error(`Fahrzeug antwortet nicht (Zündung an?): ${r}`);
+    const proto = (await this.trySend("ATDPN")) || "?";
+    return `${ver.replace("ATZ", "").trim()} | Protokoll ${proto}`;
+  }
+  async pidCore(pid, bytes, single) {
+    const hex = pid.toString(16).toUpperCase().padStart(2, "0");
+    const r = (await this.send(`01${hex}${single ? "1" : ""}`, 1000)).replace(/ /g, "").toUpperCase();
+    const idx = r.indexOf("41" + hex);
+    if (idx < 0 || r.length < idx + 4 + bytes * 2) return null;
+    const out = [];
+    for (let i = 0; i < bytes; i++) { const b = parseInt(r.substr(idx + 4 + i * 2, 2), 16); if (isNaN(b)) return null; out.push(b); }
+    return out;
+  }
+  async pid(pid, bytes) {
+    let d = await this.pidCore(pid, bytes, this.single);
+    if (!d && this.single) { d = await this.pidCore(pid, bytes, false); if (d) { this.single = false; this.log("Adapter kennt den Einzelantwort-Modus nicht – etwas langsamer."); } }
+    return d;
+  }
+  async rpm() { const d = await this.pid(0x0c, 2); return d ? (d[0] * 256 + d[1]) / 4 : null; }
+  async throttle() { const d = await this.pid(0x11, 1); return d ? d[0] * 100 / 255 : null; }
+  disconnect() { try { this.dev && this.dev.gatt.connected && this.dev.gatt.disconnect(); } catch (e) {} }
+}
+
+/* ===================================================================== App */
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("klangmotor." + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("klangmotor." + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+const tracker = new RpmTracker();
+let ctx = null, node = null, coreFallback = null;
+let source = "off"; // off | sim | obd
+let sim = null, elm = null, obdRunning = false, obdRate = 0;
+let preset = store.get("preset", null) || clone(BUILTIN[0]);
+let presetBase = clone(preset);
+let shown = { rpm: 0, load: 0 };
+let pedalDown = false, keyDown = false, pedalLevel = 0;
+
+function log(msg) {
+  const el = $("log");
+  const t = new Date().toLocaleTimeString("de-DE");
+  el.textContent += `${t}  ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setPill(text, cls) { const p = $("srcPill"); p.textContent = text; p.className = "pill" + (cls ? " " + cls : ""); }
+
+function post(msg) {
+  if (node) node.port.postMessage(msg);
+  else if (coreFallback) {
+    if (msg.preset) coreFallback.setPreset(msg.preset);
+    if (msg.input) coreFallback.setInput(msg.input.rpm, msg.input.load);
+    if ("volume" in msg) coreFallback.volume = msg.volume;
+    if ("backfire" in msg) coreFallback.backfire = msg.backfire;
+  }
+}
+
+async function startAudio() {
+  // iOS: Wiedergabe auch bei Lautlos-Schalter
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  try { const a = $("silent"); a.src = silentWav(); await a.play(); } catch (e) {}
+
+  ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+  if (ctx.state === "suspended") await ctx.resume();
+  try {
+    const src = `const EngineSynthCore = (${synthFactory.toString()})();
+class EngineProc extends AudioWorkletProcessor {
+  constructor() { super(); this.core = new EngineSynthCore(sampleRate); this.n = 0;
+    this.port.onmessage = e => { const d = e.data;
+      if (d.preset) this.core.setPreset(d.preset);
+      if (d.input) this.core.setInput(d.input.rpm, d.input.load);
+      if ('volume' in d) this.core.volume = d.volume;
+      if ('backfire' in d) this.core.backfire = d.backfire; }; }
+  process(i, o) { const out = o[0]; this.core.render(out[0], out[1] || out[0], out[0].length);
+    if ((++this.n & 15) === 0) this.port.postMessage({ rpm: this.core.rpm, load: this.core.load }); return true; }
+}
+registerProcessor('engine', EngineProc);`;
+    const url = URL.createObjectURL(new Blob([src], { type: "application/javascript" }));
+    await ctx.audioWorklet.addModule(url);
+    node = new AudioWorkletNode(ctx, "engine", { numberOfInputs: 0, outputChannelCount: [2] });
+    node.port.onmessage = e => { shown = e.data; };
+    node.connect(ctx.destination);
+  } catch (e) {
+    // Fallback ohne AudioWorklet
+    const Core = synthFactory();
+    coreFallback = new Core(ctx.sampleRate);
+    const sp = ctx.createScriptProcessor(1024, 0, 2);
+    sp.onaudioprocess = ev => {
+      const b = ev.outputBuffer; coreFallback.render(b.getChannelData(0), b.getChannelData(1), b.length);
+      shown = { rpm: coreFallback.rpm, load: coreFallback.load };
+    };
+    sp.connect(ctx.destination);
+    node = null;
+    log("Hinweis: AudioWorklet nicht verfügbar, nutze Ersatz (etwas mehr Latenz).");
+  }
+  post({ preset, volume: +$("volume").value / 100, backfire: $("chkPops").checked });
+  try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+
+function silentWav() {
+  // 0,5 s Stille, 8 kHz mono – hält auf iOS die Audiositzung im "Wiedergabe"-Modus
+  const n = 4000, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  let s = ""; new Uint8Array(b).forEach(x => s += String.fromCharCode(x));
+  return "data:audio/wav;base64," + btoa(s);
+}
+
+function startSim() {
+  stopObd();
+  tracker.reset();
+  sim = new Simulator(tracker);
+  sim.autoShift = $("chkGears").checked;
+  source = "sim";
+  setPill("Simulation", "on");
+}
+
+/* ---------- OBD ---------- */
+async function connectObd() {
+  if (!navigator.bluetooth) { showBleWarn(); return; }
+  if (!ctx) { await startAudio(); $("startOverlay").hidden = true; }
+  const btn = $("btnObd"); btn.disabled = true;
+  try {
+    stopObd();
+    elm = new BleElm(log);
+    elm.onDisconnect = () => { log("Adapter getrennt."); stopObd(); setPill("Getrennt", "err"); };
+    const name = await elm.connect();
+    $("roDev").textContent = name;
+    setPill("Initialisiere …");
+    const info = await elm.init();
+    log(`Verbunden: ${info}`);
+    sim = null; tracker.reset(); source = "obd";
+    setPill("OBD", "on");
+    $("obdSum").textContent = "verbunden";
+    pollLoop();
+  } catch (e) {
+    log(`Fehler: ${e.message || e}`);
+    setPill("OBD-Fehler", "err");
+    if (elm) elm.disconnect();
+    elm = null;
+    if (source !== "sim") startSim();
+  } finally { btn.disabled = false; }
+}
+
+async function pollLoop() {
+  obdRunning = true;
+  let i = 0, errors = 0, count = 0, t0 = now();
+  while (obdRunning && elm) {
+    try {
+      const every = $("chkThrottle").checked ? 4 : 0;
+      if (every && i % every === every - 1) { const t = await elm.throttle(); if (t != null) tracker.pushThrottle(t); }
+      else { const r = await elm.rpm(); if (r != null) { tracker.pushRpm(r); errors = 0; } else errors++; }
+    } catch (e) {
+      errors++;
+      if (errors >= 8) { log(`Abbruch: ${e.message || e}`); break; }
+    }
+    if (errors >= 25) { log("Abbruch: keine gültigen Drehzahlwerte mehr."); break; }
+    i++; count++;
+    const t = now();
+    if (t - t0 >= 1) { obdRate = count / (t - t0); count = 0; t0 = t; $("roRate").textContent = obdRate.toFixed(1); }
+  }
+  if (obdRunning) { stopObd(); setPill("OBD-Fehler", "err"); }
+}
+
+function stopObd() {
+  obdRunning = false;
+  if (elm) { elm.disconnect(); elm = null; }
+  $("roRate").textContent = "–";
+  $("obdSum").textContent = "ELM327 BLE";
+  if (source === "obd") source = "off";
+}
+
+function showBleWarn() {
+  const w = $("bleWarn");
+  const inIframe = window.top !== window.self;
+  w.innerHTML = inIframe
+    ? "Bluetooth ist in dieser eingebetteten Ansicht gesperrt. Öffne die <strong>eigenständige Datei</strong> dieser Seite in der App <strong>Bluefy</strong>."
+    : "Dieser Browser kann kein Bluetooth (Safari und Chrome auf dem iPhone können es nicht). Öffne die Seite in der App <strong>Bluefy</strong>.";
+  w.hidden = false;
+  $("obdCard").open = true;
+}
+
+/* ---------- Regler ---------- */
+function buildParams() {
+  const host = $("params");
+  host.innerHTML = "";
+  let group = null;
+  PARAMS.forEach((d, idx) => {
+    if (d.g !== group) {
+      group = d.g;
+      const h = document.createElement("div"); h.className = "pgroup"; h.textContent = group; host.appendChild(h);
+    }
+    const row = document.createElement("div"); row.className = "prow";
+    const id = "p" + idx;
+    row.innerHTML = `<label for="${id}">${d.label}</label><input type="range" id="${id}" min="0" max="1000"><output id="${id}o"></output>`;
+    host.appendChild(row);
+    const inp = row.querySelector("input");
+    inp.addEventListener("input", () => {
+      pset(preset, d.key, fromBar(d, +inp.value));
+      showParam(d, idx);
+      presetChanged(false);
+    });
+  });
+  syncParams();
+}
+function showParam(d, idx) { $("p" + idx + "o").textContent = (+pget(preset, d.key)).toFixed(d.fmt); }
+function syncParams() { PARAMS.forEach((d, idx) => { $("p" + idx).value = toBar(d, pget(preset, d.key)); showParam(d, idx); }); }
+
+let saveTimer = 0;
+function presetChanged(resetRange) {
+  post({ preset: clone(preset) });
+  $("presetLabel").textContent = preset.Name;
+  if (resetRange) { map.virtIdle = preset.DefaultIdle; map.virtMax = preset.DefaultRedline; $("mVirtIdle").value = map.virtIdle; $("mVirtMax").value = map.virtMax; store.set("map", map); }
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => store.set("preset", preset), 300);
+}
+
+function loadPreset(p, resetRange = true) {
+  if (!p || !Array.isArray(p.Resonances) || typeof p.Cylinders !== "number") throw new Error("Das ist kein gültiges Motor-Preset.");
+  preset = clone(p); presetBase = clone(p);
+  syncParams();
+  presetChanged(resetRange);
+}
+
+function fillPresetSelect() {
+  const sel = $("presetSel"); sel.innerHTML = "";
+  BUILTIN.forEach((p, i) => { const o = document.createElement("option"); o.value = i; o.textContent = p.Name; sel.appendChild(o); });
+  const o = document.createElement("option"); o.value = "cur"; o.textContent = "Aktuell bearbeitet"; sel.appendChild(o);
+  const idx = BUILTIN.findIndex(b => b.Name === preset.Name);
+  sel.value = idx >= 0 && JSON.stringify(BUILTIN[idx]) === JSON.stringify(preset) ? idx : "cur";
+}
+
+/* ---------- Drehzahlmesser ---------- */
+const tach = $("tach"), g2 = tach.getContext("2d");
+function sizeTach() {
+  const r = tach.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 3);
+  tach.width = Math.round(r.width * dpr); tach.height = Math.round(r.height * dpr);
+  g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+const COL = {};
+function drawTach() {
+  const W = tach.clientWidth, H = tach.clientHeight;
+  g2.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H * 0.6, R = Math.min(W * 0.44, H * 0.56);
+  const vmax = map.virtMax, scaleMax = Math.ceil((vmax + 500) / 1000) * 1000;
+  const a0 = 150 * Math.PI / 180, sweep = 240 * Math.PI / 180;
+  const ang = v => a0 + sweep * Math.min(1, Math.max(0, v / scaleMax));
+
+  g2.lineCap = "butt";
+  g2.lineWidth = R * 0.05; g2.strokeStyle = COL.line;
+  g2.beginPath(); g2.arc(cx, cy, R, a0, a0 + sweep); g2.stroke();
+  g2.strokeStyle = COL.rosso;
+  g2.beginPath(); g2.arc(cx, cy, R, ang(vmax), a0 + sweep); g2.stroke();
+
+  // Teilstriche: alle 500, Zahlen alle 1000
+  for (let v = 0; v <= scaleMax; v += 500) {
+    const a = ang(v), major = v % 1000 === 0, red = v >= vmax;
+    const r1 = R - R * 0.07, r2 = r1 - (major ? R * 0.1 : R * 0.05);
+    g2.strokeStyle = red ? COL.rosso : major ? COL.fg : COL.muted; g2.lineWidth = major ? 2.5 : 1.5;
+    g2.beginPath(); g2.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g2.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2); g2.stroke();
+    if (major) {
+      const rl = R * 0.7;
+      g2.fillStyle = red ? COL.rosso : COL.fg;
+      g2.font = `600 ${Math.round(R * 0.14)}px ${COL.display}`;
+      g2.textAlign = "center"; g2.textBaseline = "middle";
+      g2.fillText(String(v / 1000), cx + Math.cos(a) * rl, cy + Math.sin(a) * rl);
+    }
+  }
+
+  // Lastbogen innen
+  g2.lineWidth = R * 0.025; g2.strokeStyle = COL.panel2;
+  g2.beginPath(); g2.arc(cx, cy, R * 0.5, a0, a0 + sweep); g2.stroke();
+  g2.strokeStyle = COL.amber;
+  g2.beginPath(); g2.arc(cx, cy, R * 0.5, a0, a0 + sweep * Math.min(1, Math.max(0, shown.load))); g2.stroke();
+
+  // Nadel
+  const na = ang(shown.rpm);
+  g2.strokeStyle = COL.rosso; g2.lineWidth = Math.max(3, R * 0.025); g2.lineCap = "round";
+  g2.beginPath(); g2.moveTo(cx - Math.cos(na) * R * 0.12, cy - Math.sin(na) * R * 0.12); g2.lineTo(cx + Math.cos(na) * R * 0.92, cy + Math.sin(na) * R * 0.92); g2.stroke();
+  g2.fillStyle = COL.panel2; g2.beginPath(); g2.arc(cx, cy, R * 0.07, 0, Math.PI * 2); g2.fill();
+  g2.strokeStyle = COL.line; g2.lineWidth = 2; g2.stroke();
+
+  g2.fillStyle = COL.fg; g2.textAlign = "center"; g2.textBaseline = "alphabetic";
+  g2.font = `700 ${Math.round(R * 0.3)}px ${COL.display}`;
+  g2.fillText(Math.round(shown.rpm / 10) * 10 + "", cx, cy + R * 0.5);
+  g2.fillStyle = COL.muted; g2.font = `500 ${Math.round(R * 0.09)}px ${COL.body}`;
+  g2.fillText("U/MIN × 1000", cx, cy - R * 0.22);
+}
+
+/* ---------- Haupttakt ---------- */
+let lastT = now();
+function tick() {
+  const t = now(), dt = Math.min(0.05, t - lastT); lastT = t;
+  const target = (pedalDown || keyDown) ? 1 : 0;
+  pedalLevel += Math.max(-0.25, Math.min(0.18, target - pedalLevel)) * Math.min(1, dt / 0.03);
+  if (sim) { sim.throttle = Math.max(pedalLevel, +$("partThrottle").value / 100); sim.step(dt); }
+  if (ctx) { const inp = engineInput(tracker); post({ input: { rpm: inp.virt, load: inp.load } }); }
+}
+function frame() {
+  drawTach();
+  $("roGear").textContent = source === "sim" ? (sim.autoShift ? sim.gear : "N") : source === "obd" ? "OBD" : "–";
+  $("roReal").textContent = Math.round(tracker.snapshot().rpm);
+  $("roLoad").style.width = (Math.min(1, Math.max(0, shown.load)) * 100).toFixed(0) + "%";
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Ereignisse ---------- */
+function init() {
+  const root = document.documentElement;
+  Object.assign(COL, { line: css("--line"), rosso: css("--rosso"), fg: css("--fg"), muted: css("--muted"), amber: css("--amber"),
+    panel2: css("--panel-2"), display: css("--font-display"), body: css("--font-body") });
+
+  Object.assign(map, store.get("map", {}));
+  $("mRealIdle").value = map.realIdle; $("mRealMax").value = map.realMax; $("mVirtIdle").value = map.virtIdle; $("mVirtMax").value = map.virtMax;
+  ["mRealIdle", "mRealMax", "mVirtIdle", "mVirtMax"].forEach(id => $(id).addEventListener("change", () => {
+    map.realIdle = +$("mRealIdle").value || 800; map.realMax = +$("mRealMax").value || 6000;
+    map.virtIdle = +$("mVirtIdle").value || 1000; map.virtMax = +$("mVirtMax").value || 8700;
+    store.set("map", map);
+  }));
+
+  buildParams();
+  fillPresetSelect();
+  $("presetLabel").textContent = preset.Name;
+
+  $("presetSel").addEventListener("change", e => { const v = e.target.value; if (v !== "cur") loadPreset(BUILTIN[+v]); });
+  $("volume").addEventListener("input", e => post({ volume: +e.target.value / 100 }));
+  $("chkPops").addEventListener("change", e => post({ backfire: e.target.checked }));
+  $("chkGears").addEventListener("change", e => { if (sim) sim.autoShift = e.target.checked; });
+
+  $("btnStart").addEventListener("click", async () => {
+    await startAudio();
+    $("startOverlay").hidden = true;
+    startSim();
+  });
+
+  const pedal = $("pedal");
+  const down = e => { e.preventDefault(); pedalDown = true; pedal.classList.add("down"); try { pedal.setPointerCapture(e.pointerId); } catch (x) {} };
+  const up = () => { pedalDown = false; pedal.classList.remove("down"); };
+  pedal.addEventListener("pointerdown", down);
+  pedal.addEventListener("pointerup", up);
+  pedal.addEventListener("pointercancel", up);
+  pedal.addEventListener("contextmenu", e => e.preventDefault());
+  window.addEventListener("keydown", e => {
+    if (e.code === "Space" && !/INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement.tagName)) { keyDown = true; pedal.classList.add("down"); e.preventDefault(); }
+  });
+  window.addEventListener("keyup", e => { if (e.code === "Space") { keyDown = false; if (!pedalDown) pedal.classList.remove("down"); } });
+
+  $("btnObd").addEventListener("click", connectObd);
+  $("btnSim").addEventListener("click", async () => { if (!ctx) { await startAudio(); $("startOverlay").hidden = true; } startSim(); });
+  if (!navigator.bluetooth) { $("obdSum").textContent = "hier nicht verfügbar"; }
+
+  $("btnReset").addEventListener("click", () => { preset = clone(presetBase); syncParams(); presetChanged(false); });
+  $("btnRandom").addEventListener("click", () => {
+    PARAMS.forEach(d => { if (d.key === "Cylinders") return; const b = Math.max(0, Math.min(1000, toBar(d, pget(preset, d.key)) + Math.round((Math.random() * 2 - 1) * 60))); pset(preset, d.key, fromBar(d, b)); });
+    syncParams(); presetChanged(false); $("presetSel").value = "cur";
+  });
+  $("btnCopy").addEventListener("click", async () => {
+    const txt = JSON.stringify(preset, null, 2);
+    $("jsonBox").value = txt;
+    try { await navigator.clipboard.writeText(txt); log("Preset-JSON in die Zwischenablage kopiert."); }
+    catch (e) { $("jsonBox").select(); log("Kopieren nicht erlaubt – JSON steht im Feld, bitte selbst kopieren."); }
+  });
+  $("btnApplyJson").addEventListener("click", () => {
+    try { loadPreset(JSON.parse($("jsonBox").value)); $("presetSel").value = "cur"; log("Preset übernommen."); }
+    catch (e) { log(`JSON nicht übernommen: ${e.message}`); $("tuneCard").open = true; }
+  });
+  $("fileIn").addEventListener("change", async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { loadPreset(JSON.parse(await f.text())); $("presetSel").value = "cur"; log(`Preset „${preset.Name}“ geladen.`); }
+    catch (err) { log(`Datei nicht lesbar: ${err.message}`); }
+    e.target.value = "";
+  });
+
+  sizeTach();
+  window.addEventListener("resize", sizeTach);
+  setInterval(tick, 10);
+  requestAnimationFrame(frame);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && ctx && ctx.state !== "running") ctx.resume(); });
+  log("Bereit. Start antippen, dann Gaspedal halten.");
+}
+init();
+</script>
