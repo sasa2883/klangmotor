@@ -544,15 +544,46 @@ class Simulator {
 }
 
 /* ===================================================================== ELM327 über Bluetooth LE (Web Bluetooth, z. B. Bluefy) */
-const BLE_SERVICES = [0xfff0, 0xffe0, 0x18f0, 0xfee7, "e7810a71-73ae-499d-8c15-faa9aef0c3f2", "0000ffe0-0000-1000-8000-00805f9b34fb"];
+// Volle 128-Bit-UUIDs (kleingeschrieben) – manche iOS-Browser verarbeiten Kurzformen nicht zuverlässig.
+const BLE_SERVICES = [
+  "0000fff0-0000-1000-8000-00805f9b34fb",
+  "0000ffe0-0000-1000-8000-00805f9b34fb",
+  "000018f0-0000-1000-8000-00805f9b34fb",
+  "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function fmtErr(e) {
+  if (e == null) return "unbekannt";
+  if (typeof e !== "object") return `Code ${e}`;
+  const parts = [e.name, e.code != null && e.code !== 0 ? `Code ${e.code}` : null, e.message].filter(Boolean);
+  return parts.join(" – ") || String(e);
+}
 class BleElm {
   constructor(log) { this.log = log; this.buf = ""; this.pending = null; this.single = true; this.dev = null; }
   async connect() {
-    const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BLE_SERVICES });
+    let dev;
+    try {
+      dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BLE_SERVICES });
+    } catch (e) {
+      throw new Error(`Geräteauswahl fehlgeschlagen (${fmtErr(e)})`);
+    }
     this.dev = dev;
     dev.addEventListener("gattserverdisconnected", () => this.onDisconnect && this.onDisconnect());
-    this.log(`Verbinde mit ${dev.name || "Gerät"} …`);
-    const gatt = await dev.gatt.connect();
+    this.log(`Gewählt: ${dev.name || "(ohne Namen)"}`);
+    // iOS braucht oft mehrere Anläufe, bis die BLE-Verbindung steht
+    let gatt = null, lastErr = null;
+    for (let attempt = 1; attempt <= 3 && !gatt; attempt++) {
+      try {
+        this.log(`Verbinde (Versuch ${attempt}) …`);
+        gatt = await dev.gatt.connect();
+      } catch (e) {
+        lastErr = e;
+        this.log(`  fehlgeschlagen: ${fmtErr(e)}`);
+        await sleep(700 * attempt);
+      }
+    }
+    if (!gatt) throw new Error(`Verbindung nicht möglich (${fmtErr(lastErr)})`);
+    await sleep(300);
     let services = [];
     try { services = await gatt.getPrimaryServices(); } catch (e) { /* manche Browser erlauben nur gezielte Abfrage */ }
     if (!services.length) for (const s of BLE_SERVICES) { try { services.push(await gatt.getPrimaryService(s)); } catch (e) {} }
@@ -740,7 +771,9 @@ async function connectObd() {
     $("obdSum").textContent = "verbunden";
     pollLoop();
   } catch (e) {
-    log(`Fehler: ${e.message || e}`);
+    log(`Fehler: ${e && e.message ? e.message : fmtErr(e)}`);
+    log("Tipps: andere OBD-Apps schließen, Adapter kurz abziehen, Bluetooth aus/an. Den Adapter NICHT in den iPhone-Einstellungen koppeln.");
+    $("obdCard").open = true;
     setPill("OBD-Fehler", "err");
     if (elm) elm.disconnect();
     elm = null;
